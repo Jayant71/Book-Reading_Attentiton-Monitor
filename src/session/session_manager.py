@@ -8,7 +8,7 @@ from queue import Queue, Empty
 from src.camera.camera_manager import CameraManager
 from src.analysis.attention_monitor import AttentionMonitor
 from src.models.gaze_estimator import GazeEstimator
-from src.models.object_detector import ObjectDetector
+from src.models.book_detector import ObjectDetector
 import numpy as np
 
 logging.basicConfig(
@@ -33,13 +33,11 @@ class SessionManager:
         self.attention_monitor = AttentionMonitor(book_detector_model_path)
         
         # Session state
-        self.frame_counter = 0
         self.last_attention_data = None
         self.last_processed_frame = None
         self.running = False
         
         # Performance settings
-        self.PROCESS_INTERVAL = 10
         self.fps = 0
         self.frame_times = []
         self.max_frame_times = 30
@@ -63,20 +61,16 @@ class SessionManager:
                 self.last_processed_frame = processed_frame
                 
                 # Process frame with object detection
-                frame_with_detections, detections = self.object_detector.detect_objects(frame)
+                frame_with_detections, detections = self._detect_objects(frame)
                 
                 # Prepare data for attention analysis
                 attention_data = self._prepare_attention_data(gaze_results, detections)
                 
                 # Analyze attention
-                self.last_attention_data = self.attention_monitor.analyze_attention(
-                    frame_with_detections,
-                    attention_data
-                )
+                self.last_attention_data = self._analyze_attention(frame_with_detections, attention_data)
                 
                 # Log attention info periodically
-                if self.frame_counter % 15 == 0:
-                    self._log_attention_info(self.last_attention_data)
+                self._log_attention_info(self.last_attention_data)
                     
             except Exception as e:
                 logger.error(f"Error processing frame: {str(e)}", exc_info=True)
@@ -91,8 +85,15 @@ class SessionManager:
 
     def _analyze_gaze(self, frame: np.ndarray) -> Tuple[np.ndarray, Dict[str, Any]]:
         """Analyze gaze direction in the frame"""
-        processed_frame, gaze_data = self.gaze_analyzer.estimate_gaze(frame)
-        return processed_frame, gaze_data
+        return self.gaze_analyzer.estimate_gaze(frame)
+
+    def _detect_objects(self, frame: np.ndarray) -> Tuple[np.ndarray, List[dict]]:
+        """Detect objects in the frame"""
+        return self.object_detector.detect_objects(frame)
+
+    def _analyze_attention(self, frame: np.ndarray, attention_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Analyze attention based on gaze and object detection results"""
+        return self.attention_monitor.analyze_attention(frame, attention_data)
 
     def _prepare_attention_data(self, gaze_results: Dict[str, Any], 
                               detections: List[dict]) -> Dict[str, Any]:
@@ -176,12 +177,10 @@ class SessionManager:
                     continue
                 
                 self._update_fps()
-                self.frame_counter += 1
 
                 # Queue frame for processing
-                if self.frame_counter % self.PROCESS_INTERVAL == 0:
-                    if not self.frame_queue.full():
-                        self.frame_queue.put(frame)
+                if not self.frame_queue.full():
+                    self.frame_queue.put(frame)
                 
                 # Display frame with visualization
                 self._display_frame(frame)
