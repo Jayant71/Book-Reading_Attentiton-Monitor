@@ -45,70 +45,6 @@ class CameraManager:
             self.camera.release()
             cv2.destroyAllWindows()
 
-    def _draw_3d_arrow(self, img: np.ndarray, start_point: Tuple[int, int], 
-                      yaw: float, pitch: float, length: int = 100) -> None:
-        """Draw a 3D arrow indicating gaze direction"""
-        # Convert angles to radians
-        yaw_rad = np.radians(yaw)
-        pitch_rad = np.radians(pitch)
-        
-        # Calculate 3D direction vector
-        dx = length * np.sin(yaw_rad)
-        dy = length * np.sin(pitch_rad)
-        dz = length * np.cos(yaw_rad) * np.cos(pitch_rad)
-        
-        # Project end point to 2D
-        end_x = int(start_point[0] + dx)
-        end_y = int(start_point[1] + dy)
-        
-        # Calculate arrow head points (3D)
-        arrow_head_length = length * 0.3
-        arrow_head_width = length * 0.2
-        
-        # Base of the arrow head
-        base_x = end_x - dx * 0.2
-        base_y = end_y - dy * 0.2
-        
-        # Calculate perpendicular vectors for arrow head
-        perp_x = -dy
-        perp_y = dx
-        norm = np.sqrt(perp_x*perp_x + perp_y*perp_y)
-        if norm > 0:
-            perp_x = perp_x/norm * arrow_head_width
-            perp_y = perp_y/norm * arrow_head_width
-        
-        # Arrow head points
-        left_x = int(base_x - perp_x)
-        left_y = int(base_y - perp_y)
-        right_x = int(base_x + perp_x)
-        right_y = int(base_y + perp_y)
-        
-        # Draw main shaft with gradient color and thickness
-        num_segments = 10
-        for i in range(num_segments):
-            t1 = i / num_segments
-            t2 = (i + 1) / num_segments
-            pt1_x = int(start_point[0] + dx * t1)
-            pt1_y = int(start_point[1] + dy * t1)
-            pt2_x = int(start_point[0] + dx * t2)
-            pt2_y = int(start_point[1] + dy * t2)
-            
-            # Gradient from yellow to red
-            color = (0, 
-                    255 * (1 - t1),  # Decrease green component
-                    255)  # Full red
-            
-            # Varying thickness
-            thickness = int(5 * (1 - t1) + 2)
-            cv2.line(img, (pt1_x, pt1_y), (pt2_x, pt2_y), color, thickness)
-        
-        # Draw arrow head
-        cv2.fillPoly(img, [np.array([
-            [end_x, end_y],
-            [left_x, left_y],
-            [right_x, right_y]
-        ])], (0, 0, 255))
-
     def display_frame(self, frame: np.ndarray, attention_data: dict) -> None:
         """Display frame with attention monitoring overlay"""
         display_frame = frame.copy()
@@ -120,38 +56,7 @@ class CameraManager:
         canvas = np.zeros((total_height, w, 3), dtype=np.uint8)
         
         # Place the video frame below the info panel
-        canvas[info_panel_height:, :] = display_frame
-        
-        # Draw face bounding box and gaze direction if face is detected
-        if attention_data['has_face'] and attention_data.get('bounding_box'):
-            bbox = attention_data['bounding_box']
-            
-            # Convert relative coordinates to absolute pixel coordinates
-            x = int(bbox['Left'] * w)
-            y = int(bbox['Top'] * h) + info_panel_height  # Adjust y coordinate for info panel
-            width = int(bbox['Width'] * w)
-            height = int(bbox['Height'] * h)
-            
-            # Draw face bounding box
-            cv2.rectangle(canvas, (x, y), (x + width, y + height), (0, 255, 0), 3)
-            
-            # Draw 3D gaze direction arrow
-            if attention_data.get('gaze_direction'):
-                # Center point of the face
-                center_x = x + width // 2
-                center_y = y + height // 2
-                
-                gaze_dir = attention_data['gaze_direction']
-                
-                # Draw 3D arrow with length proportional to face size
-                arrow_length = int(max(width, height) * 1.5)
-                self._draw_3d_arrow(
-                    canvas,
-                    (center_x, center_y),
-                    gaze_dir['yaw'],
-                    gaze_dir['pitch'],
-                    arrow_length
-                )
+        canvas[info_panel_height:, :] = display_frame        
         
         # Draw book bounding box if detected
         if attention_data.get('book_box'):

@@ -9,7 +9,7 @@ import time
 logger = logging.getLogger(__name__)
 
 class AttentionMonitor:
-    def __init__(self, model_path: str):
+    def __init__(self, model_path: str = "src/model_weights/yolo12s.pt"):
         # Load YOLO with optimization flags
         self.yolo_model = YOLO(model_path)
         

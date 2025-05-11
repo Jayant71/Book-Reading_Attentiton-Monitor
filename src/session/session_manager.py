@@ -1,13 +1,15 @@
 from datetime import datetime
 import time
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, Optional, Tuple, List
 import cv2
 import threading
 from queue import Queue, Empty
 from src.camera.camera_manager import CameraManager
 from src.analysis.attention_monitor import AttentionMonitor
-from gaze import GazeAnalyzer
+from src.models.gaze_estimator import GazeEstimator
+from src.models.object_detector import ObjectDetector
+import numpy as np
 
 logging.basicConfig(
     level=logging.INFO,
@@ -16,95 +18,142 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 class SessionManager:
-    def __init__(self, camera_manager: CameraManager, gaze_analyzer: GazeAnalyzer, model_path: str):
+    def __init__(self, camera_manager: CameraManager, gaze_analyzer: GazeEstimator, book_detector_model_path: str = "src/model_weights/yolo12s.pt"):
+        """
+        Initialize the session manager with required components.
+        
+        Args:
+            camera_manager: Camera manager instance
+            gaze_analyzer: Gaze analyzer instance
+            model_path: Path to the YOLO model weights
+        """
         self.camera_manager = camera_manager
         self.gaze_analyzer = gaze_analyzer
-        self.attention_monitor = AttentionMonitor(model_path)
+        self.object_detector = ObjectDetector(book_detector_model_path)
+        self.attention_monitor = AttentionMonitor(book_detector_model_path)
+        
+        # Session state
         self.frame_counter = 0
         self.last_attention_data = None
         self.last_processed_frame = None
+        self.running = False
         
-        # Increase processing interval to reduce CPU load (adjust as needed)
-        self.PROCESS_INTERVAL = 15  # Process every 15th frame
-        
-        # FPS tracking
+        # Performance settings
+        self.PROCESS_INTERVAL = 10
         self.fps = 0
         self.frame_times = []
-        self.max_frame_times = 30  # For calculating rolling average
+        self.max_frame_times = 30
         
-        self.running = False
-        self.frame_queue = Queue(maxsize=2)  # Slightly larger queue for smoother operation
+        # Threading
+        self.frame_queue = Queue(maxsize=2)
         logger.info("Session Manager initialized")
 
     def _process_frames(self):
-        """Background thread for processing frames through L2CS and YOLO"""
+        """Background thread for processing frames through gaze analysis and object detection"""
         logger.info("Starting frame processing thread")
         
         while self.running:
             try:
-                # Use a timeout to avoid blocking indefinitely
-                try:
-                    frame = self.frame_queue.get(timeout=0.1)
-                except Empty:
+                frame = self._get_frame_from_queue()
+                if frame is None:
                     continue
                 
-                # Skip processing if thread has been stopped
-                if not self.running:
-                    break
-                
-                # Process with L2CS (gaze detection)
-                processed_frame, gaze_results = self.gaze_analyzer.analyze_gaze(frame)
-                
-                # Store the processed frame
+                # Process frame with gaze analysis
+                processed_frame, gaze_results = self._analyze_gaze(frame)
                 self.last_processed_frame = processed_frame
                 
-                # Skip logging for better performance
-                # logger.info("Processing frame with L2CS")
+                # Process frame with object detection
+                frame_with_detections, detections = self.object_detector.detect_objects(frame)
                 
-                # Prepare data for AttentionMonitor
-                gaze_data_for_monitor = {
-                    'pitch': gaze_results.get('pitch'),
-                    'yaw': gaze_results.get('yaw'),
-                    'confidence': gaze_results.get('confidence'),
-                    'bbox': gaze_results.get('bbox'),
-                    'has_face': gaze_results.get('has_face', True)  # Add has_face flag
-                }
+                # Prepare data for attention analysis
+                attention_data = self._prepare_attention_data(gaze_results, detections)
                 
                 # Analyze attention
-                # logger.info("Analyzing attention status")  # Skip logging for performance
                 self.last_attention_data = self.attention_monitor.analyze_attention(
-                    frame,
-                    gaze_data_for_monitor
+                    frame_with_detections,
+                    attention_data
                 )
                 
-                # Only log attention changes for reduced I/O
+                # Log attention info periodically
                 if self.frame_counter % 15 == 0:
                     self._log_attention_info(self.last_attention_data)
                     
             except Exception as e:
                 logger.error(f"Error processing frame: {str(e)}", exc_info=True)
-                # Create basic default attention data on error
-                self.last_attention_data = {
-                    'is_attentive': False,
-                    'has_face': False,
-                    'has_book': False,
-                    'message': f"Error: {str(e)[:50]}"
-                }
+                self._handle_processing_error()
+
+    def _get_frame_from_queue(self) -> Optional[np.ndarray]:
+        """Get frame from queue with timeout"""
+        try:
+            return self.frame_queue.get(timeout=0.1)
+        except Empty:
+            return None
+
+    def _analyze_gaze(self, frame: np.ndarray) -> Tuple[np.ndarray, Dict[str, Any]]:
+        """Analyze gaze direction in the frame"""
+        processed_frame, gaze_data = self.gaze_analyzer.estimate_gaze(frame)
+        return processed_frame, gaze_data
+
+    def _prepare_attention_data(self, gaze_results: Dict[str, Any], 
+                              detections: List[dict]) -> Dict[str, Any]:
+        """Prepare data for attention analysis"""
+        attention_data = {
+            'pitch': gaze_results.get('pitch'),
+            'yaw': gaze_results.get('yaw'),
+            'has_face': gaze_results.get('has_face', False),
+            'confidence': gaze_results.get('confidence', 0.0),
+            'bbox': gaze_results.get('bbox')
+        }
+        
+        # Filter detections for books
+        book_detections = self.object_detector.filter_detections(
+            detections,
+            min_confidence=0.5,
+            target_classes=['book']
+        )
+        
+        if book_detections:
+            attention_data['has_book'] = True
+            attention_data['book_detection'] = book_detections[0]
+        else:
+            attention_data['has_book'] = False
+            
+        return attention_data
+
+    def _handle_processing_error(self):
+        """Handle processing errors by creating default attention data"""
+        self.last_attention_data = {
+            'is_attentive': False,
+            'has_face': False,
+            'has_book': False,
+            'message': "Error in processing"
+        }
 
     def _update_fps(self):
         """Update FPS calculation with rolling average"""
         current_time = time.time()
         self.frame_times.append(current_time)
         
-        # Keep only recent frames for calculation
         if len(self.frame_times) > self.max_frame_times:
             self.frame_times.pop(0)
             
-        # Calculate FPS from frame times
         if len(self.frame_times) > 1:
             time_diff = self.frame_times[-1] - self.frame_times[0]
             if time_diff > 0:
                 self.fps = (len(self.frame_times) - 1) / time_diff
+
+    def _log_attention_info(self, attention_data: Dict[str, Any]) -> None:
+        """Log detailed attention information"""
+        if not attention_data:
+            return
+            
+        logger.info(
+            "Attention Status - Message: %s, Has Face: %s, Has Book: %s, Is Attentive: %s",
+            attention_data.get('message', 'Unknown'),
+            attention_data.get('has_face', False),
+            attention_data.get('has_book', False),
+            attention_data.get('is_attentive', False)
+        )
 
     def run_session(self) -> None:
         """Run the attention monitoring session"""
@@ -123,65 +172,28 @@ class SessionManager:
             while True:
                 frame = self.camera_manager.capture_frame()
                 if frame is None:
-                    time.sleep(0.01)  # Short sleep to avoid CPU spinning
+                    time.sleep(0.01)
                     continue
                 
-                # Update FPS calculation
                 self._update_fps()
                 self.frame_counter += 1
 
-                # Queue frame for processing with throttling
+                # Queue frame for processing
                 if self.frame_counter % self.PROCESS_INTERVAL == 0:
-                    # Don't block if queue is full - just skip the frame
                     if not self.frame_queue.full():
-                        # Use a smaller version of the frame for processing if needed
-                        # frame_small = cv2.resize(frame, (640, 480))  # Uncomment if needed
                         self.frame_queue.put(frame)
                 
-                # Display the frame with visualization
-                display_frame = None
+                # Display frame with visualization
+                self._display_frame(frame)
                 
-                if self.last_processed_frame is not None:
-                    # Always use the processed frame from L2CS if available
-                    display_frame = self.last_processed_frame.copy()
-                    
-                    # Add FPS counter to the frame
-                    cv2.putText(
-                        display_frame,
-                        f"FPS: {self.fps:.1f}",
-                        (10, 120),  # Position below other text
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.7,
-                        (0, 255, 255),  # Yellow
-                        2
-                    )
-                    
-                    if self.last_attention_data:
-                        self.camera_manager.display_frame(display_frame, self.last_attention_data)
-                    else:
-                        cv2.imshow('Attention Monitor', display_frame)
-                else:
-                    # Show raw frame with FPS if no processed frame
-                    display_frame = frame.copy()
-                    cv2.putText(
-                        display_frame,
-                        f"FPS: {self.fps:.1f}",
-                        (10, 30),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        1,
-                        (0, 255, 255),
-                        2
-                    )
-                    cv2.imshow('Attention Monitor', display_frame)
-                
-                # Check for 'q' key to quit - use short wait time for better responsiveness
+                # Check for exit
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                     logger.info("Session ended by user")
                     break
                 
-                # Limit CPU usage if frames are processed very quickly
+                # Limit CPU usage
                 elapsed = time.time() - last_frame_time
-                if elapsed < 0.01:  # Target ~100 Hz maximum
+                if elapsed < 0.01:
                     time.sleep(0.01 - elapsed)
                 last_frame_time = time.time()
                 
@@ -190,34 +202,49 @@ class SessionManager:
         except Exception as e:
             logger.error(f"Unexpected error in session: {str(e)}", exc_info=True)
         finally:
-            logger.info("Cleaning up resources")
-            self.running = False
-            
-            # Wait for processing thread to finish with timeout
-            if process_thread.is_alive():
-                process_thread.join(timeout=2.0)
-                
-            self.camera_manager.release()
-            cv2.destroyAllWindows()
+            self._cleanup(process_thread)
 
-    def _log_attention_info(self, attention_data: Dict[str, Any]) -> None:
-        """Log detailed attention information"""
-        if not attention_data:
-            return
-            
-        logger.info(
-            "Attention Status - Message: %s, Has Face: %s, Has Book: %s, Is Attentive: %s",
-            attention_data.get('message', 'Unknown'),
-            attention_data.get('has_face', False),
-            attention_data.get('has_book', False),
-            attention_data.get('is_attentive', False)
-        )
+    def _display_frame(self, frame: np.ndarray) -> None:
+        """Display frame with attention monitoring overlay"""
+        display_frame = frame.copy()
         
-        gaze_dir = attention_data.get('gaze_direction')
-        if gaze_dir:
-            logger.info(
-                "Gaze Info - Pitch: %.2f, Yaw: %.2f, Confidence: %.2f%%",
-                gaze_dir.get('pitch', 0.0),
-                gaze_dir.get('yaw', 0.0),
-                gaze_dir.get('confidence', 0.0) * 100
+        if self.last_processed_frame is not None:
+            display_frame = self.last_processed_frame.copy()
+            
+            # Add FPS counter
+            cv2.putText(
+                display_frame,
+                f"FPS: {self.fps:.1f}",
+                (10, 120),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (0, 255, 255),
+                2
             )
+            
+            if self.last_attention_data:
+                self.camera_manager.display_frame(display_frame, self.last_attention_data)
+            else:
+                cv2.imshow('Attention Monitor', display_frame)
+        else:
+            cv2.putText(
+                display_frame,
+                f"FPS: {self.fps:.1f}",
+                (10, 30),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1,
+                (0, 255, 255),
+                2
+            )
+            cv2.imshow('Attention Monitor', display_frame)
+
+    def _cleanup(self, process_thread: threading.Thread) -> None:
+        """Clean up resources"""
+        logger.info("Cleaning up resources")
+        self.running = False
+        
+        if process_thread.is_alive():
+            process_thread.join(timeout=2.0)
+            
+        self.camera_manager.release()
+        cv2.destroyAllWindows()

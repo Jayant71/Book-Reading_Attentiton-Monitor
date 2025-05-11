@@ -43,6 +43,8 @@ runs
 sample.jpg
 sample.mp4
 *.zip
+*.pt
+*.onnx
 
 Reports/
 runs/
