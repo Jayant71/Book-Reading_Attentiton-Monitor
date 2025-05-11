@@ -52,8 +52,8 @@ class CameraManager:
         
         # Create a larger canvas to accommodate the info panel above the video
         info_panel_height = 140
-        total_height = h + info_panel_height
-        canvas = np.zeros((total_height, w, 3), dtype=np.uint8)
+        total_height = h + info_panel_height + 100
+        canvas = np.zeros((total_height, w + 100, 3), dtype=np.uint8)
         
         # Place the video frame below the info panel
         canvas[info_panel_height:, :] = display_frame        

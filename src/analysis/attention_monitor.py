@@ -226,7 +226,7 @@ class AttentionMonitor:
             attention_status['has_face'] = True
             attention_status['face_box'] = face_bbox_coords
             
-            logger.debug(f"Face detected - Pitch: {pitch:.2f}°, Yaw: {yaw:.2f}°")
+            # logger.debug(f"Face detected - Pitch: {pitch:.2f}°, Yaw: {yaw:.2f}°")
             
             # Calculate face center
             if face_bbox_coords:

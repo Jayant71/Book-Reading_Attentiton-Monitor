@@ -8,7 +8,7 @@ from queue import Queue, Empty
 from src.camera.camera_manager import CameraManager
 from src.analysis.attention_monitor import AttentionMonitor
 from src.models.gaze_estimator import GazeEstimator
-from src.models.book_detector import ObjectDetector
+from src.models.book_detector import BookDetector
 import numpy as np
 
 logging.basicConfig(
@@ -29,7 +29,7 @@ class SessionManager:
         """
         self.camera_manager = camera_manager
         self.gaze_analyzer = gaze_analyzer
-        self.object_detector = ObjectDetector(book_detector_model_path)
+        self.book_detector = BookDetector(book_detector_model_path)
         self.attention_monitor = AttentionMonitor(book_detector_model_path)
         
         # Session state
@@ -64,13 +64,13 @@ class SessionManager:
                 frame_with_detections, detections = self._detect_objects(frame)
                 
                 # Prepare data for attention analysis
-                attention_data = self._prepare_attention_data(gaze_results, detections)
+                # attention_data = self._prepare_attention_data(gaze_results, detections)
                 
                 # Analyze attention
-                self.last_attention_data = self._analyze_attention(frame_with_detections, attention_data)
+                # self.last_attention_data = self._analyze_attention(frame_with_detections, attention_data)
                 
                 # Log attention info periodically
-                self._log_attention_info(self.last_attention_data)
+                # self._log_attention_info(self.last_attention_data)
                     
             except Exception as e:
                 logger.error(f"Error processing frame: {str(e)}", exc_info=True)
@@ -89,7 +89,7 @@ class SessionManager:
 
     def _detect_objects(self, frame: np.ndarray) -> Tuple[np.ndarray, List[dict]]:
         """Detect objects in the frame"""
-        return self.object_detector.detect_objects(frame)
+        return self.book_detector.detect_objects(frame)
 
     def _analyze_attention(self, frame: np.ndarray, attention_data: Dict[str, Any]) -> Dict[str, Any]:
         """Analyze attention based on gaze and object detection results"""
@@ -107,7 +107,7 @@ class SessionManager:
         }
         
         # Filter detections for books
-        book_detections = self.object_detector.filter_detections(
+        book_detections = self.book_detector.filter_detections(
             detections,
             min_confidence=0.5,
             target_classes=['book']
