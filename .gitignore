@@ -1,0 +1,52 @@
+# Document files
+*.docx
+*.pdf
+
+# Python
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+*.so
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Environment variables and virtual environments
+.env
+venv/
+env/
+ENV/
+
+# IDE specific
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+.Spotlight-V100
+.Trashes
+
+# Testing and logs
+*.log
+.coverage
+.pytest_cache/
+htmlcov/
+runs
+
+sample.jpg
+sample.mp4
+*.zip
+
+Reports/
+runs/
+yolo12s.onnx
+yolo12s.pt
+yolo-export.py
+L2CSNet_gaze360.pkl

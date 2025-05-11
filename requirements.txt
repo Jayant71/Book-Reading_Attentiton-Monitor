@@ -1,0 +1,8 @@
+opencv-python>=4.7.0
+numpy>=1.22.0
+python-dotenv>=0.21.0
+torch>=2.0.0
+torchvision>=0.15.0
+onnx>=1.13.0
+onnxruntime>=1.13.0
+
