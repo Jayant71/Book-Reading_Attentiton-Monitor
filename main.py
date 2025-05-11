@@ -3,7 +3,8 @@ import sys
 import logging
 from pathlib import Path
 
-YOLO_MODEL_PATH = "src/model_weights/yolo12s.pt"
+# YOLO_MODEL_PATH = "src/model_weights/yolo12s.pt"
+YOLO_MODEL_PATH = "yolo12s.pt"
 L2CS_MODEL_PATH = "src/model_weights/L2CSNet_gaze360.pkl"
 
 # Configure logging
