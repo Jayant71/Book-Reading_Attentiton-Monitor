@@ -87,6 +87,7 @@ class SessionManager:
         """Analyze gaze direction in the frame"""
         return self.gaze_analyzer.estimate_gaze(frame)
 
+
     def _detect_objects(self, frame: np.ndarray) -> Tuple[np.ndarray, List[dict]]:
         """Detect objects in the frame"""
         return self.book_detector.detect_objects(frame)
