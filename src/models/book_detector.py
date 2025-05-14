@@ -80,7 +80,7 @@ def main():
     parser = argparse.ArgumentParser(description='Book Detection Demo')
     parser.add_argument('--source', type=str, default='0',
                       help='Video source (0 for webcam, URL for IP camera, or path to video/image file)')
-    parser.add_argument('--model', type=str, default='src/model_weights/yolo12s.pt',
+    parser.add_argument('--model', type=str, default='src/model_weights/best.pt',
                       help='Path to YOLO model weights')
     parser.add_argument('--min-confidence', type=float, default=0.5,
                       help='Minimum confidence threshold for detections')
