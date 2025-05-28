@@ -42,10 +42,10 @@ class AttentionMonitor:
         # Based on consistent user feedback, the model's axes are swapped.
         
         # Horizontal movement (dx) is controlled by the model's 'pitch'.
-        dx = length * np.sin(pitch) 
+        dx = -length * np.sin(pitch) * np.cos(yaw)
         
         # Vertical movement (dy) is controlled by the model's 'yaw'.
-        dy = length * np.sin(yaw)
+        dy = -length * np.sin(yaw)
         
         # Calculate the final end point.
         # We add dy because the screen's y-axis increases downwards.
