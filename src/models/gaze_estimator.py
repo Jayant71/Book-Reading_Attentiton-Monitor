@@ -58,8 +58,8 @@ class GazeEstimator:
                 
                 # processed_frame = self.visualize_gaze_vector(frame, pitch, yaw, bbox)
                 # logger.info(f"Gaze Data: {gaze_data}")
-                processed_frame = render(frame, results)
-                return processed_frame, gaze_data
+                # processed_frame = render(frame, results)
+                return frame, gaze_data
             
             
             # If no valid results, return original frame
