@@ -9,7 +9,7 @@ class AttentionAnalyzer:
     def __init__(self):
         pass
 
-    def analyze_attention(self, aws_response: Dict[str, Any]) -> Dict[str, Any]:
+    def analyze_attention(self, response: Dict[str, Any]) -> Dict[str, Any]:
         attention_data = {
             'is_looking': False,
             'gaze_direction': 'Unknown',
@@ -18,7 +18,7 @@ class AttentionAnalyzer:
             'eye_direction': None
         }
 
-        face_details = aws_response.get('FaceDetails', [])
+        face_details = response.get('FaceDetails', [])
         
         # Check if face is detected
         if not face_details:
