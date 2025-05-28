@@ -131,6 +131,13 @@ class SessionManager:
             cv2.rectangle(display_frame, (x1, y1), (x2, y2), color, 2)
             cv2.putText(display_frame, state, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
 
+        # Draw gaze vector
+        if 'gaze_direction' in self.last_attention_data and self.last_attention_data['gaze_direction']:
+            gaze_info = self.last_attention_data['gaze_direction']
+            start_point = tuple(np.array(gaze_info['start_point']).astype(int))
+            end_point = tuple(np.array(gaze_info['end_point']).astype(int))
+            cv2.line(display_frame, start_point, end_point, (255, 0, 0), 2)  # Blue line for gaze
+
         # Display FPS
         cv2.putText(display_frame, f"FPS: {self.fps:.1f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
         

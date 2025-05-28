@@ -22,92 +22,51 @@ class AttentionMonitor:
         
         logger.info("Initialized Attention Monitor.")
 
-    def _calculate_3d_gaze_vector(self, pitch: float, yaw: float) -> np.ndarray:
-        """
-        Calculate 3D gaze vector from pitch and yaw angles.
-        Pitch > 0 is Down, Yaw > 0 is Right.
-        """
-        try:
-            pitch_rad = np.radians(pitch)
-            yaw_rad = np.radians(yaw)
-            
-            cos_pitch = np.cos(pitch_rad)
-            sin_pitch = np.sin(pitch_rad)
-            cos_yaw = np.cos(yaw_rad)
-            sin_yaw = np.sin(yaw_rad)
-            
-            x = cos_pitch * sin_yaw
-            y = sin_pitch  # Positive y is down, which matches screen coordinates
-            z = cos_pitch * cos_yaw
-            
-            vector = np.array([x, y, z], dtype=np.float32)
-            norm = np.linalg.norm(vector)
-            
-            if norm > self.epsilon:
-                vector /= norm
-                
-            return vector
-            
-        except Exception as e:
-            logger.error(f"Error calculating 3D gaze vector: {str(e)}")
-            return np.array([0, 0, 1], dtype=np.float32)
-
     def _calculate_gaze_line(self, face_center: Tuple[float, float], 
-                           pitch: float, yaw: float, frame_shape: Tuple[int, int, int]) -> Tuple[Tuple, np.ndarray, Tuple]:
+                           pitch: float, yaw: float, 
+                           face_bbox: Tuple[int, int, int, int]) -> Tuple[Tuple[int, int], Tuple[int, int]]:
         """
         Calculate start and end points for 2D gaze line visualization.
+        
+        NOTE: This version corrects for an observed axis swap from the underlying gaze model.
+        It maps the model's 'pitch' to the horizontal axis (dx) and the model's 'yaw'
+        to the vertical axis (dy) to produce correct, intuitive visualization.
         """
-        gaze_vector = self._calculate_3d_gaze_vector(pitch, yaw)
-        length = min(frame_shape[0], frame_shape[1]) * 0.4 # Increased length for better visualization
+        start_point = np.array(face_center, dtype=np.int32)
         
-        # dx and dy are based on the 2D projection of the gaze vector
-        dx = length * gaze_vector[0] 
-        dy = length * gaze_vector[1]
+        # Determine the length of the gaze line using the width of the face bounding box, scaled for visibility.
+        x1, _, x2, _ = face_bbox
+        length = float(x2 - x1) * 2.0
+
+        # --- DEFINITIVE FIX FOR AXIS SWAP ---
+        # Based on consistent user feedback, the model's axes are swapped.
         
-        start_point = np.array(face_center, dtype=np.float32)
-        # FIX: The Y-axis for screen coordinates increases downwards. No inversion needed.
+        # Horizontal movement (dx) is controlled by the model's 'pitch'.
+        dx = length * np.sin(pitch) 
+        
+        # Vertical movement (dy) is controlled by the model's 'yaw'.
+        dy = length * np.sin(yaw)
+        
+        # Calculate the final end point.
+        # We add dy because the screen's y-axis increases downwards.
         end_point = np.array([start_point[0] + dx, start_point[1] + dy], dtype=np.int32)
         
-        return start_point, gaze_vector, end_point
+        return tuple(start_point.tolist()), tuple(end_point.tolist())
 
-    def _gaze_intersects_box(self, gaze_origin: Tuple[float, float], gaze_vector: np.ndarray,
-                             box_coords: Tuple[int, int, int, int]) -> bool:
+    def _is_gaze_endpoint_in_box(self, gaze_endpoint: Tuple[int, int], 
+                                   box_coords: Tuple[int, int, int, int]) -> bool:
         """
-        Check if a 2D gaze ray intersects with a 2D bounding box.
-        This is the new, corrected intersection logic.
+        Check if the gaze endpoint is inside the given bounding box.
         """
+        if gaze_endpoint is None or box_coords is None:
+            return False
+
+        px, py = gaze_endpoint
         x1, y1, x2, y2 = box_coords
-        ox, oy = gaze_origin
-
-        # The 2D direction vector on the screen
-        dx = gaze_vector[0]
-        dy = gaze_vector[1]
-
-        # If origin of gaze is already inside the book, count it as intersection.
-        if x1 <= ox <= x2 and y1 <= oy <= y2:
-            return True
-
-        # Check for intersection with each of the four sides of the bounding box
-        # We are checking if the ray starting from gaze_origin intersects the box edges
-        t_values = []
-        # Top edge
-        if abs(dy) > self.epsilon:
-            t = (y1 - oy) / dy
-            if t > 0 and x1 <= (ox + t * dx) <= x2: t_values.append(t)
-        # Bottom edge
-        if abs(dy) > self.epsilon:
-            t = (y2 - oy) / dy
-            if t > 0 and x1 <= (ox + t * dx) <= x2: t_values.append(t)
-        # Left edge
-        if abs(dx) > self.epsilon:
-            t = (x1 - ox) / dx
-            if t > 0 and y1 <= (oy + t * dy) <= y2: t_values.append(t)
-        # Right edge
-        if abs(dx) > self.epsilon:
-            t = (x2 - ox) / dx
-            if t > 0 and y1 <= (oy + t * dy) <= y2: t_values.append(t)
-
-        return len(t_values) > 0
+        
+        isAttentive = (x1 <= px <= x2) and (y1 <= py <= y2)
+        
+        return isAttentive
 
     def analyze_attention(self, gaze_data: Dict[str, Any], 
                           book_detections: List[Dict[str, Any]],
@@ -133,35 +92,38 @@ class AttentionMonitor:
         if not gaze_data.get('has_face'):
             return attention_status
 
-        pitch, yaw, face_bbox_coords = gaze_data.get('pitch'), gaze_data.get('yaw'), gaze_data.get('bbox')
-        attention_status.update({'has_face': True, 'face_box': face_bbox_coords})
+        pitch, yaw, face_bbox_list = gaze_data.get('pitch'), gaze_data.get('yaw'), gaze_data.get('bbox')
+        
+        has_face_bbox = face_bbox_list is not None and face_bbox_list.size > 0
+        
+        attention_status.update({'has_face': True, 'face_box': face_bbox_list[0] if has_face_bbox else None})
 
-        if pitch is None or yaw is None:
+        if pitch is None or yaw is None or not has_face_bbox:
             attention_status['message'] = "Gaze estimation failed"
             return attention_status
-
-        face_center = (w / 2, h / 2)
-        if face_bbox_coords is not None and len(face_bbox_coords) > 0:
-            x1, y1, x2, y2 = face_bbox_coords[0] 
-            face_center = ((x1 + x2) / 2, (y1 + y2) / 2)
-
-        current_pitch = pitch[0] if pitch is not None and len(pitch) > 0 else 0.0
-        current_yaw = yaw[0] if yaw is not None and len(yaw) > 0 else 0.0
-
-        start_point, gaze_vector, end_point = self._calculate_gaze_line(face_center, current_pitch, current_yaw, frame_shape)
-        attention_status['gaze_direction'] = {'pitch': current_pitch, 'yaw': current_yaw, 'start_point': start_point.tolist(), 'end_point': end_point.tolist()}
         
-        # FIX: Correctly check for 'opened_book' instead of 'closed_book'
-        opened_book_detections = [d for d in book_detections if d.get('class_name') == 'opened_book']
+        # Use the first detected face for analysis
+        face_bbox_coords = face_bbox_list[0]
+        x1, y1, x2, y2 = face_bbox_coords 
+        face_center = ((x1 + x2) / 2, (y1 + y2) / 2)
+
+        # Using pitch and yaw from the first detected face.
+        current_pitch = pitch[0]
+        current_yaw = yaw[0]
+
+        start_point, end_point = self._calculate_gaze_line(face_center, current_pitch, current_yaw, face_bbox_coords)
+        attention_status['gaze_direction'] = {'pitch': current_pitch, 'yaw': current_yaw, 'start_point': start_point, 'end_point': end_point}
+        
+        opened_book_detections = [d for d in book_detections if d.get('class_name') == 'opened']
         
         if opened_book_detections:
             attention_status.update({'has_book': True, 'book_state': 'opened'})
             book_box = opened_book_detections[0]['bbox']
             attention_status['book_box'] = book_box
 
-            is_intersecting = self._gaze_intersects_box(face_center, gaze_vector, book_box)
+            is_attentive = self._is_gaze_endpoint_in_box(end_point, book_box)
             
-            if is_intersecting:
+            if is_attentive:
                 attention_status.update({'is_attentive': True, 'message': 'Attentive'})
             else:
                 attention_status.update({'is_attentive': False, 'message': 'Distracted'})
